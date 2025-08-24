@@ -1020,6 +1020,62 @@ class NFA(fa.FA):
         the extended Hopcroft-Karp algorithm (HKe). See
         https://arxiv.org/abs/0907.5058
         """
+        return self._equivalence_check(other, return_counterexample=False)[0]
+
+    def counterexample(self, other: Any) -> Optional[Tuple[int, str]]:
+        """
+        Return a witness string that the specified NFA (0 if self,
+        1 if other) does not accept while the other does, if they are not
+        equal. If both NFA's are equivalent, return None. Uses an optimized
+        version of the extended Hopcroft-Karp algorithm (HKe). See
+        https://arxiv.org/abs/0907.5058
+
+        Parameters
+        ----------
+        other : NFA
+            The NFA which we are comparing for equality.
+
+        Returns
+        ------
+        Tuple[int, str]
+            The index of the NFA the witness string is not accepted by and
+            the witness string.
+        """
+        (equivalence, counterexample) = self._equivalence_check(
+            other, return_counterexample=True
+        )
+        if not equivalence:
+            return counterexample
+        else:
+            return None
+
+    def _equivalence_check(
+        self, other: NFA, return_counterexample: bool = False
+    ) -> Tuple[bool, Optional[Tuple[int, str]]]:
+        """
+        Internal helper for __eq__ and counterexample to avoid code duplication.
+        The first element of the returned pair is True if the two NFA's are equal
+        and False otherwise. If return_counterexample is True and the DFAs are
+        different, the second element is (diff_nfa_index, witness_string) and
+        None otherwise. Uses an optimized version of the extended Hopcroft-Karp
+        algorithm (HKe). See
+        https://arxiv.org/abs/0907.5058
+
+        Parameters
+        ----------
+        other : NFA
+            The NFA which we are comparing for equality.
+        return_counterexample : bool
+            Boolean specifying if a string is returned showing why the NFA's are not
+            equivalent.
+
+        Returns
+        ------
+        Tuple[bool, Optional[Tuple[int, str]]]
+            The first element provides if the NFA's are equivalent. The second element
+            provides the witness string and specifies which NFA the witness string
+            returns False for if the NFA's are not equal, and None otherwise.
+        """
 
         NFAStatesPairT: TypeAlias = Tuple[FrozenSet[NFAStateT], int]
 
@@ -1050,27 +1106,32 @@ class NFA(fa.FA):
 
         # Get data structures
         state_sets = nx.utils.union_find.UnionFind([initial_state_a, initial_state_b])
-        pair_stack: Deque[Tuple[NFAStatesPairT, NFAStatesPairT]] = deque()
+        pair_stack: Deque[Tuple[NFAStatesPairT, NFAStatesPairT, str]] = deque()
 
         # Do union find
         state_sets.union(initial_state_a, initial_state_b)
-        pair_stack.append((initial_state_a, initial_state_b))
+        pair_stack.append((initial_state_a, initial_state_b, ""))
 
         while pair_stack:
-            q_a, q_b = pair_stack.pop()
+            q_a, q_b, path = pair_stack.pop()
 
             if is_final_state(q_a) ^ is_final_state(q_b):
-                return False
+                return (
+                    False,
+                    (int(is_final_state(q_a)), path) if return_counterexample else None
+                )
 
             for symbol in self.input_symbols:
-                r_1 = state_sets[transition(q_a, symbol)]
-                r_2 = state_sets[transition(q_b, symbol)]
+                t_1 = transition(q_a, symbol)
+                t_2 = transition(q_b, symbol)
+                if state_sets[t_1] != state_sets[t_2]:
+                    state_sets.union(t_1, t_2)
+                    newpath = path + symbol \
+                        if return_counterexample \
+                        else path
+                    pair_stack.append((t_1, t_2, newpath))
 
-                if r_1 != r_2:
-                    state_sets.union(r_1, r_2)
-                    pair_stack.append((r_1, r_2))
-
-        return True
+        return (True, None)
 
     @classmethod
     def edit_distance(
